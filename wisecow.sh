@@ -37,6 +37,7 @@ main() {
 	echo "Wisdom served on port=$SRVPORT..."
 
 	while true; do
+		# shellcheck disable=SC2002 # cat keeps the fifo open-for-read off the shell; "nc < fifo" would block before nc listens
 		cat "$RSPFILE" | nc -lN "$SRVPORT" | handleRequest
 		sleep 0.01
 	done
