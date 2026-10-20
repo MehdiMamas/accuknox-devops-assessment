@@ -39,16 +39,16 @@ def check(url, expected, timeout=5.0, follow_redirects=False):
             code = resp.status
     except urllib.error.HTTPError as exc:
         code = exc.code
-    except (socket.timeout, TimeoutError):
+    except TimeoutError:
         reason = "timeout"
     except urllib.error.URLError as exc:
-        reason = "timeout" if isinstance(exc.reason, (socket.timeout, TimeoutError)) else "connection error: %s" % exc.reason
+        reason = "timeout" if isinstance(exc.reason, (socket.timeout, TimeoutError)) else f"connection error: {exc.reason}"
     except (ValueError, OSError) as exc:
-        reason = "error: %s" % exc
+        reason = f"error: {exc}"
     ms = round((time.monotonic() - start) * 1000, 1)
     if code is not None:
         up = code in expected
-        reason = "" if up else "unexpected status %d" % code
+        reason = "" if up else f"unexpected status {code}"
     else:
         up = False
     return {"url": url, "status": "UP" if up else "DOWN", "code": code, "response_ms": ms, "reason": reason}
@@ -80,8 +80,8 @@ def main(argv=None):
                 all_up = all_up and r["status"] == "UP"
                 results_log.append(r)
                 if not args.json:
-                    extra = " (%s)" % r["reason"] if r["reason"] else ""
-                    print("%s %-4s %s code=%s time=%sms%s" % (time.strftime("%H:%M:%S"), r["status"], url, r["code"], r["response_ms"], extra), flush=True)
+                    extra = " ({})".format(r["reason"]) if r["reason"] else ""
+                    print("{} {:<4} {} code={} time={}ms{}".format(time.strftime("%H:%M:%S"), r["status"], url, r["code"], r["response_ms"], extra), flush=True)
             if not args.interval or (args.count and rounds >= args.count):
                 break
             time.sleep(args.interval)
@@ -97,7 +97,7 @@ def main(argv=None):
     elif args.interval:
         print("\nUptime summary:")
         for u, s in summary.items():
-            print("  %s  %.2f%% (%d/%d)" % (u, s["uptime_percent"], s["up"], s["checks"]))
+            print("  {}  {:.2f}% ({}/{})".format(u, s["uptime_percent"], s["up"], s["checks"]))
     return 0 if ok else 1
 
 

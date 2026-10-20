@@ -14,7 +14,7 @@ class HealthMonitorTest(unittest.TestCase):
             log = os.path.join(d, "logs", "h.log")
             p = subprocess.run([os.path.join(SCRIPTS, "system_health_monitor.sh"), "--once",
                                 "--cpu", "0", "--mem", "0", "--disk", "0", "--procs", "1", "--log", log],
-                               capture_output=True, text=True)
+                               check=False, capture_output=True, text=True)
             self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
             self.assertIn("ALERT", p.stdout)
             with open(log) as fh:
@@ -24,7 +24,7 @@ class HealthMonitorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = subprocess.run([os.path.join(SCRIPTS, "system_health_monitor.sh"), "--once",
                                 "--cpu", "101", "--mem", "101", "--disk", "101", "--procs", "10000000",
-                                "--log", os.path.join(d, "h.log")], capture_output=True, text=True)
+                                "--log", os.path.join(d, "h.log")], check=False, capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
 
@@ -38,7 +38,7 @@ class BackupTest(unittest.TestCase):
             report = os.path.join(d, "r.log")
             cmd = [os.path.join(SCRIPTS, "backup.sh"), "--source", src, "--type", "local",
                    "--dest", dst, "--report", report, "--keep", "2"]
-            p = subprocess.run(cmd, capture_output=True, text=True)
+            p = subprocess.run(cmd, check=False, capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
             self.assertIn("status=SUCCESS", p.stdout)
             self.assertEqual(len(glob.glob(os.path.join(dst, "data-*.tar.gz"))), 1)
@@ -50,12 +50,12 @@ class BackupTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = subprocess.run([os.path.join(SCRIPTS, "backup.sh"), "--source", d, "--type", "local",
                                 "--dest", os.path.join(d, "x"), "--dry-run", "--report", os.path.join(d, "r.log")],
-                               capture_output=True, text=True)
+                               check=False, capture_output=True, text=True)
             self.assertEqual(p.returncode, 0)
             self.assertIn("dry-run", p.stdout)
             self.assertFalse(os.path.exists(os.path.join(d, "x")))
             p = subprocess.run([os.path.join(SCRIPTS, "backup.sh"), "--source", "/nonexistent", "--type", "local", "--dest", d],
-                               capture_output=True, text=True)
+                               check=False, capture_output=True, text=True)
             self.assertEqual(p.returncode, 2)
 
 

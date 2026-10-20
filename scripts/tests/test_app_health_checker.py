@@ -5,7 +5,7 @@ import threading
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import app_health_checker as hc  # noqa: E402
+import app_health_checker as hc
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -23,7 +23,7 @@ class HealthCheckerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-        cls.base = "http://127.0.0.1:%d" % cls.server.server_address[1]
+        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
 
     @classmethod

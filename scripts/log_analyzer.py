@@ -29,7 +29,7 @@ def hour_bucket(timestamp):
         date, hh = timestamp.split(" ")[0].split(":")[0:2]
         day, mon, year = date.split("/")
         months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        return "%s-%02d-%s %s:00" % (year, months.index(mon) + 1, day, hh)
+        return f"{year}-{months.index(mon) + 1:02d}-{day} {hh}:00"
     except (ValueError, IndexError):
         return "unknown"
 
@@ -76,19 +76,19 @@ def _top(counter, n):
 
 def format_text(r):
     out = [
-        "Total requests : %d" % r["total_requests"],
-        "Malformed lines: %d" % r["malformed_lines"],
-        "Unique IPs     : %d" % r["unique_ips"],
-        "Bytes served   : %d" % r["bytes_served"],
+        "Total requests : {}".format(r["total_requests"]),
+        "Malformed lines: {}".format(r["malformed_lines"]),
+        "Unique IPs     : {}".format(r["unique_ips"]),
+        "Bytes served   : {}".format(r["bytes_served"]),
         "",
         "Status codes:",
     ]
-    out += ["  %s  %d" % kv for kv in r["status_codes"].items()]
-    out += ["", "404 responses: %d" % r["not_found_count"], "Top 404 paths:"]
-    out += ["  %6d  %s" % (c, p) for p, c in r["top_404_paths"]]
-    out += ["", "Top pages:"] + ["  %6d  %s" % (c, p) for p, c in r["top_pages"]]
-    out += ["", "Top IPs:"] + ["  %6d  %s" % (c, p) for p, c in r["top_ips"]]
-    out += ["", "Requests per hour:"] + ["  %s  %d" % kv for kv in r["requests_per_hour"].items()]
+    out += ["  {}  {}".format(*kv) for kv in r["status_codes"].items()]
+    out += ["", "404 responses: {}".format(r["not_found_count"]), "Top 404 paths:"]
+    out += [f"  {c:6d}  {p}" for p, c in r["top_404_paths"]]
+    out += ["", "Top pages:"] + [f"  {c:6d}  {p}" for p, c in r["top_pages"]]
+    out += ["", "Top IPs:"] + [f"  {c:6d}  {p}" for p, c in r["top_ips"]]
+    out += ["", "Requests per hour:"] + ["  {}  {}".format(*kv) for kv in r["requests_per_hour"].items()]
     return "\n".join(out)
 
 
@@ -102,7 +102,7 @@ def main(argv=None):
         with open_input(args.logfile) as fh:
             result = analyze(fh, args.top)
     except OSError as exc:
-        print("error: %s" % exc, file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2) if args.json else format_text(result))
     return 0

@@ -9,7 +9,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.dirname(HERE)
 sys.path.insert(0, SCRIPTS)
-import log_analyzer  # noqa: E402
+import log_analyzer
 
 SAMPLE = os.path.join(SCRIPTS, "sample_logs", "access.log")
 
