@@ -98,12 +98,18 @@ check_once() {
 		if [ "$pct" -ge "$DISK_T" ]; then log "ALERT disk usage on ${mount} ${pct}% >= threshold ${DISK_T}%"; alerts=$((alerts + 1)); fi
 	done < <(df -P 2>/dev/null | awk 'NR>1 && $1 !~ /^(tmpfs|devfs|overlay|map)/ && $6 ~ /^\// && $6 !~ /^\/(System\/Volumes\/(VM|Preboot|Update|xarts|iSCPreboot|Hardware)|Library\/Developer|private\/var\/run|Volumes\/Recovery)/ {print $5, $6}')
 
-	procs=$(ps -e 2>/dev/null | awk 'NR>1' | wc -l | tr -d ' ')
+	if command -v ps >/dev/null 2>&1; then
+		procs=$(ps -e 2>/dev/null | awk 'NR>1' | wc -l | tr -d ' ')
+	else
+		procs=$(find /proc -maxdepth 1 -name '[0-9]*' 2>/dev/null | wc -l | tr -d ' ')
+	fi
 	log "INFO  processes=${procs}"
 	if [ "$procs" -ge "$PROCS_T" ]; then log "ALERT process count ${procs} >= threshold ${PROCS_T}"; alerts=$((alerts + 1)); fi
 
-	log "INFO  top 5 processes by CPU:"
-	while read -r line; do log "INFO    ${line}"; done < <(ps -eo pid,pcpu,comm 2>/dev/null | awk 'NR>1' | sort -k2 -nr | head -n 5)
+	if command -v ps >/dev/null 2>&1; then
+		log "INFO  top 5 processes by CPU:"
+		while read -r line; do log "INFO    ${line}"; done < <(ps -eo pid,pcpu,comm 2>/dev/null | awk 'NR>1' | sort -k2 -nr | head -n 5)
+	fi
 
 	return $((alerts > 0 ? 1 : 0))
 }
