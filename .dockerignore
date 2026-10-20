@@ -1,0 +1,10 @@
+.git
+.github
+.worktrees
+k8s
+scripts
+README.md
+LICENSE
+Dockerfile
+.dockerignore
+logs
