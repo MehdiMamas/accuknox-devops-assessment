@@ -1,0 +1,4 @@
+# Debian security updates replace exact package versions, so pinning them
+# (DL3008) would break the build; the base image tag is pinned instead.
+ignored:
+  - DL3008
