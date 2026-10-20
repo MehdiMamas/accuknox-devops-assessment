@@ -1,0 +1,193 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+  CERT_MANAGER_VERSION: v1.15.3
+  KUBECONFORM_VERSION: v0.6.7
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck wisecow.sh scripts/*.sh
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+      - name: kubeconform
+        run: |
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz kubeconform
+          ./kubeconform -strict -summary -ignore-missing-schemas k8s/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: python lint
+        run: |
+          pip install ruff
+          ruff check scripts/
+
+  scripts-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover scripts/tests -v
+
+  build-push:
+    needs: [lint, scripts-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      sha_tag: ${{ steps.vars.outputs.sha_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: vars
+        run: echo "sha_tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_TAG: ${{ needs.build-push.outputs.sha_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: kind config
+        run: |
+          cat > kind-config.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+              kubeadmConfigPatches:
+                - |
+                  kind: InitConfiguration
+                  nodeRegistration:
+                    kubeletExtraArgs:
+                      node-labels: "ingress-ready=true"
+              extraPortMappings:
+                - containerPort: 80
+                  hostPort: 80
+                  protocol: TCP
+                - containerPort: 443
+                  hostPort: 443
+                  protocol: TCP
+          EOF
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: wisecow
+          config: kind-config.yaml
+      - name: Install ingress-nginx
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.2/deploy/static/provider/kind/deploy.yaml
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
+          kubectl -n cert-manager rollout status deploy/cert-manager --timeout=180s
+          kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=180s
+          kubectl -n cert-manager rollout status deploy/cert-manager-cainjector --timeout=180s
+      - name: Pull image and load into kind
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          IMAGE_LC=$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')
+          docker pull "${IMAGE_LC}:${IMAGE_TAG}"
+          kind load docker-image "${IMAGE_LC}:${IMAGE_TAG}" --name wisecow
+      - name: Deploy
+        run: |
+          IMAGE_LC=$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')
+          cd k8s
+          curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+          ./kustomize edit set image "ghcr.io/OWNER/accuknox-devops-assessment=${IMAGE_LC}:${IMAGE_TAG}"
+          ./kustomize build . | kubectl apply -f -
+          rm -f kustomize
+          kubectl -n wisecow rollout status deploy/wisecow --timeout=180s
+          kubectl -n wisecow wait --for=condition=Ready certificate/wisecow-tls --timeout=120s
+      - name: Smoke test
+        run: |
+          for _ in $(seq 1 20); do
+            body=$(curl -sk --resolve wisecow.local:443:127.0.0.1 https://wisecow.local/ || true)
+            echo "$body" | grep -q '\^__\^' && break
+            sleep 3
+          done
+          echo "$body"
+          echo "$body" | grep -q '\^__\^'
+          code=$(curl -s -o /dev/null -w '%{http_code}' --resolve wisecow.local:80:127.0.0.1 http://wisecow.local/)
+          echo "http status: $code"
+          [ "$code" = "308" ] || [ "$code" = "301" ] || [ "$code" = "302" ]
+      - name: Debug on failure
+        if: failure()
+        run: |
+          kubectl get all,ingress,certificate -A || true
+          kubectl -n wisecow describe pods || true
+
+  deploy-cluster:
+    needs: build-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ needs.build-push.outputs.sha_tag }}
+      KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG }}
+    steps:
+      - name: Check for KUBE_CONFIG secret
+        id: gate
+        run: |
+          if [ -n "${KUBE_CONFIG_B64}" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "KUBE_CONFIG not set, skipping real-cluster deploy"; fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.enabled == 'true'
+      - name: Deploy to cluster
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          mkdir -p ~/.kube
+          echo "${KUBE_CONFIG_B64}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+          IMAGE_LC=$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')
+          cd k8s
+          curl -sSL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+          ./kustomize edit set image "ghcr.io/OWNER/accuknox-devops-assessment=${IMAGE_LC}:${IMAGE_TAG}"
+          ./kustomize build . | kubectl apply -f -
+          kubectl -n wisecow rollout status deploy/wisecow --timeout=180s
